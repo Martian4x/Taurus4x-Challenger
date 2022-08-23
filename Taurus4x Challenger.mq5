@@ -11,7 +11,7 @@
 
 #include <Martian4xLib\MoneyManagement.mqh>
 #include <Tools\DateTime.mqh>
-CDateTime DateTime;
+struct CDateTime;
 enum ENUM_TRADING_PHASES
 {
    PHASE_1,         //PHASE 1: EVALUATION
@@ -27,12 +27,10 @@ input int ChallengeCapital = 10000;
 input int ProfitTarget_Percentage = 10;
 input int MaxDailyLoss_Percentage = 5;
 input int MaxLoss_Percentage = 10;
-input int ChallengeDurationDays = 30;
-datetime StartDate;
-datetime EndDate;
+input int ChallengeDurationMonths = 1;
 input ENUM_TRADING_PHASES    CurrentChallengePhase = PHASE_1;                       
 input ENUM_TIMEFRAMES        FrequenceTimeframe    = PERIOD_M1;                          //Monitoring Timeframe
-ENUM_BAR_PROCESSING_METHOD   BarProcessingMethod   = ONLY_PROCESS_TICKS_FROM_NEW_M1_BAR;  //EA Bar Processing Method (All systems I use M1 Data to process)
+input ENUM_BAR_PROCESSING_METHOD   BarProcessingMethod   = ONLY_PROCESS_TICKS_FROM_NEW_M1_BAR;  //EA Bar Processing Method (All systems I use M1 Data to process)
 
 //################
 //Global Variables
@@ -45,12 +43,15 @@ string   SymbolsProcessedThisIteration;
 
 int      iBarToUseForProcessing; 
 //globals
-double deals_profits;
 string challenge_status = "";
 //Global variables 
-double Profit=0, ProfitSymbol=0;
+double deals_profits,current_profit, max_loss, profit_goal,floting_profits,daily_max_loss;
+string challengeMetrics;
+datetime StartDate, EndDate;
 int OnInit() {
+   string challengeMetrics = "";
    
+   OutputStatusToScreen(challengeMetrics);
    // END of Connection 
    return(INIT_SUCCEEDED);
 }
@@ -103,9 +104,16 @@ void OnTick() {
       ulong account_number = AccountInfoInteger(ACCOUNT_LOGIN);
       // 2. Check if there is a unsaved position
       // Print("Deals Total: ", IntegerToString(deals_total));
+      
+      current_profit=0;
+      max_loss=0;
+      profit_goal = 0;
+      floting_profits =0;
+      daily_max_loss=0;
+      deals_profits=0;
       for(uint i=0;i<deals_total;i++) 
       {
-         //--- Objectives
+         //--- Objectivess
          /**
          1. Get the total profit of order history
          2. Get the total profit of open orders
@@ -119,28 +127,30 @@ void OnTick() {
          double deal_fee =HistoryDealGetDouble(deal_ticket,DEAL_FEE);
          double deal_swap =HistoryDealGetDouble(deal_ticket,DEAL_SWAP);
          string symbol =HistoryDealGetString(deal_ticket,DEAL_SYMBOL); 
-         datetime deal_time =(datetime)HistoryDealGetInteger(deal_ticket,DEAL_TIME);
          if(symbol!=""){
+            datetime deal_time =(datetime)HistoryDealGetInteger(deal_ticket,DEAL_TIME);
             deals_profits = deals_profits+deal_profit+deal_swap+deal_commission+deal_fee;
 
-            Print("Start Date :",TimeToString(deal_time, TIME_DATE|TIME_SECONDS));
-            // datetime nDate = 0, cDate = D'2013.01.31 00:00';
-            // StartDate = TimeToString(deal_time, TIME_DATE|TIME_SECONDS);
+            if(StartDate!=NULL){
+               continue;
+            }
             StartDate = deal_time;
-            EndDate = StringToTime(StringConcatenate(DateTime.Year(StartDate), ".", Month(StartDate)+1, ".", Day(StartDate)));
-            Print ("Start Date: ", TimeToString(StartDate));
-            Print ("End Date: ", TimeToString(EndDate));
-            // deals_profits = deals_profits+deal_commission;
          }
     
       }
+      CDateTime newStartDate;
+      TimeToStruct(StartDate,newStartDate);
+      newStartDate.MonInc(ChallengeDurationMonths);
+      EndDate = newStartDate.DateTime();
+      // Print("Start Date: ", TimeToString(StartDate, TIME_DATE|TIME_SECONDS));
+      // Print("End Date: ", EndDate);
          // Print("Balance:", DoubleToString(deals_profits));
       // Get Floating P/L
-      double floting_profits = FlotingProfit();
-      double current_profit = floting_profits+deals_profits;
-      double profit_goal = ChallengeCapital*ProfitTarget_Percentage/100;
-      double max_loss = ChallengeCapital*MaxLoss_Percentage/100;
-      double daily_max_loss = ChallengeCapital*MaxDailyLoss_Percentage/100;
+      floting_profits = FlotingProfit();
+      current_profit = floting_profits+deals_profits;
+      profit_goal = ChallengeCapital*ProfitTarget_Percentage/100;
+      max_loss = ChallengeCapital*MaxLoss_Percentage/100;
+      daily_max_loss = ChallengeCapital*MaxDailyLoss_Percentage/100;
       
       //3. Check the Objective is reached
       // Challenge Passed
@@ -150,42 +160,53 @@ void OnTick() {
       }else if(current_profit<=profit_goal&&current_profit<=-max_loss){
          challenge_status = "NOT PASSED";
       // Challenge Not Passed | Reach daily max limit
-      }else if(current_profit<=-daily_max_loss)
-      // Print("Deals Profits: ",DoubleToString(deals_profits));
-      Print("Current Profit: ",DoubleToString(current_profit));
+      }else if(current_profit<=-daily_max_loss){
 
-      ExpertRemove(); // TODO: Removed
+      }
+      // Print("Deals Profits: ",DoubleToString(deals_profits));
+      // Print("Current Profit: ",DoubleToString(current_profit));
+
+      // ExpertRemove(); // TODO: Removed
+      // Print("current_profit: ",current_profit, " max_loss: ",max_loss, " profit_goal: ",profit_goal," floting_profits: ",floting_profits," daily_max_loss: ",daily_max_loss);
+      OutputStatusToScreen(challengeMetrics);
+
    }
-  
 }
 
-// double CheckTotalProfits()
-//   {
 
-//    Profit=0;
-//    ProfitSymbol=0;
+void OutputStatusToScreen(string additionalMetrics)
+{
+   double offsetInHours = (TimeCurrent() - TimeGMT()) / 3600.0;
 
-//    // 
-//    for(int l_pos_0=OrdersTotal()-1; l_pos_0>=0; l_pos_0--)
-//      {
-//         bool order=OrderSelect(l_pos_0,SELECT_BY_POS,MODE_TRADES);
-      
-//       if(!order)
-//         {
-//          continue;
-//         }
-
-//       if(OrderType()==OP_BUY || OrderType()==OP_SELL)
-//         {
-//          double order_profit=OrderProfit()+OrderSwap()+OrderCommission();
-//          Profit+=order_profit;
-//             ProfitSymbol+=order_profit;
-//         }
-//      }
-//       return(ProfitSymbol);
-//   }
-
-// void OnDeinit(const int reason) {
+   double currentDD = 0;
+   if((ChallengeCapital+current_profit)<ChallengeCapital){
+      currentDD = ChallengeCapital-(ChallengeCapital+current_profit);
+   }
    
-// }
+   string OutputText = "\n\r";
+   
+   OutputText += "MT5 SERVER TIME: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS) + " (OPERATING AT UTC/GMT" + StringFormat("%+.1f", offsetInHours) + ")\n\r\n\r";
+   
+   OutputText += "CHALLENGE  | CAPITAL: " + IntegerToString(ChallengeCapital) + " | GOAL: " + IntegerToString(ChallengeCapital+profit_goal) + "\n\r";
+   OutputText += "DATES:   START: " + TimeToString(StartDate, TIME_DATE|TIME_SECONDS) +"  |  END: "+EndDate+ "\n\r";
+   OutputText += "CURRENT STATUS  | BALANCE: " + DoubleToString(deals_profits,2) +" |  EQUIT: " + DoubleToString(current_profit,2) + "  |  PROGRESS: " + DoubleToString(current_profit/profit_goal*100,2) + "%\n\r";
+   OutputText += "MAX DRAWDOWNS:   MAX: -" + DoubleToString(max_loss, 0) +"  |  CURRENT: -"+DoubleToString(currentDD, 2)+ "\n\r";
+
+   //SYMBOLS BEING TRADED
+   // OutputText += "SYMBOLS:   ";
+   // for(int SymbolLoop=0; SymbolLoop < NumberOfTradeableSymbols; SymbolLoop++)
+   // {
+   //    OutputText += " " + SymbolArray[SymbolLoop];
+   // }
+   
+   //Timeframe Info
+   OutputText += "\n\rPROCESSING METHOD:   " + EnumToString(BarProcessingMethod) + "\n\r";
+   OutputText += "PROCESSING TIMEFRAME:   " + EnumToString(FrequenceTimeframe) + "\n\r";
+   
+   // Comment(OutputText);
+   Comment(OutputText,
+         "\n\r\n\r", additionalMetrics);
+
+   return;
+}
 
